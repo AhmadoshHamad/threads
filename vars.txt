@@ -1,0 +1,3 @@
+numberOfMedicines=2
+maxNumOfAddEmp=2
+numOfEmp=3
