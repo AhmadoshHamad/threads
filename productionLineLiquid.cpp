@@ -4,52 +4,10 @@
 // #include <unistd.h>
 #include "all.h"
 
-#define MAXSIZE 100 // max size of the line
-#define THRESHOLD  MAXSIZE/2 //threshold
-
-int lineNumber ;
-int numOfAddEmp = 0;
-int maxNumOfEmp ;
-int randomSeed =0 ;
-
-void checking(int  , int );
-struct produced_medicine {
-    bool level;
-    bool color;
-    bool sealed;
-    bool label;
-    bool expiryDate;
-    int pid;
-    //int check; // for testing 1 is good 0 bad
-};
-
-struct produced_medicine m[MAXSIZE];
-
-struct inspection_medicine {
-    struct produced_medicine medicine;
-};
-
-struct packaging_medicine {
-    
-    struct produced_medicine medicine;
-};
-
-struct inspection_medicine ins[MAXSIZE];
-struct packaging_medicine pac[MAXSIZE];
-
-int produce_index = 0;
-int inspection_index = 0;
-int packaging_index = 0;
-
-pthread_cond_t cond_produce = PTHREAD_COND_INITIALIZER;
-pthread_cond_t cond_inspection = PTHREAD_COND_INITIALIZER;
-pthread_cond_t cond_packaging = PTHREAD_COND_INITIALIZER;
-
-pthread_mutex_t m_mutex = PTHREAD_MUTEX_INITIALIZER;
-pthread_mutex_t ins_mutex = PTHREAD_MUTEX_INITIALIZER;
-pthread_mutex_t pac_mutex = PTHREAD_MUTEX_INITIALIZER;
+#include "Liquid.h"
 
 void *produce(void *arg) {
+    int line = *((int *)arg); // Dereference the pointer to get the integer value
     int speed = rand() % 4 + 1;
     //printf("*LIQUID* start producing..%d\n",lineNumber);
     while (1) {
@@ -71,13 +29,16 @@ void *produce(void *arg) {
         }
         
         pthread_mutex_unlock(&m_mutex);
+        sendingSignal(openID, SIGRTMIN+6, line);
         sleep(2);
         pthread_cond_signal(&cond_inspection);
     }
     return NULL;
 }
-
+int *lineNumberThread = (int*) malloc(sizeof(int)); // Allocate memory for the integer
 void *inspection(void *arg) {
+    int line = *((int *)arg); // Dereference the pointer to get the integer value
+        printf("%d", line);
    // printf("start inspection...*LIQUID*%d\n",lineNumber);
     while (1) {
         pthread_mutex_lock(&m_mutex);
@@ -88,14 +49,16 @@ void *inspection(void *arg) {
             ins[inspection_index % MAXSIZE].medicine = m[inspection_index % MAXSIZE];
             inspection_index++;
         //  printf("inspect new medicine and it is good *LIQUID*\n");
-            checking(produce_index,inspection_index);
+            // checking(produce_index,inspection_index);
             pthread_mutex_unlock(&ins_mutex);
             pthread_cond_signal(&cond_packaging);
-            
+            sendingSignal(openID, SIGRTMIN, line);
         } else {
            inspection_index++;
+           parameter_ptr->bottleFail++;
+           sendingSignal(openID, SIGRTMIN+2, line);
            printf("inspect new medicine and it is bad *LIQUID*\n");
-           checking(produce_index,inspection_index);
+        //    checking(produce_index,inspection_index);
         }
         pthread_mutex_unlock(&m_mutex);
         sleep(2);
@@ -106,6 +69,7 @@ void *inspection(void *arg) {
 }
 
 void *packaging(void *arg) {
+    int line = *((int *)arg); // Dereference the pointer to get the integer value
     //printf("*LIQUID*start packaging...%d\n",lineNumber);
     while (1) {
         pthread_mutex_lock(&pac_mutex);
@@ -116,53 +80,64 @@ void *packaging(void *arg) {
         //printf("packaging new medicine and it is good\n");
         pthread_mutex_unlock(&ins_mutex);
         pthread_mutex_unlock(&pac_mutex);
+        sendingSignal(openID, SIGRTMIN+1, line);
+        sendingSignal(openID, SIGRTMIN+3, line);
+        parameter_ptr->success++;
         sleep(2);
         pthread_cond_signal(&cond_inspection);
         pthread_cond_signal(&cond_produce);
     }
     return NULL;
 }
+// void signal_catcher(int sig){
+//     int pid = getpid();
+//     if (pthread_cancel(thread) != 0) {
+//             perror("Error cancelling thread");
+//             exit(EXIT_FAILURE);
+//     }
+// }
 
 void checking(int p  , int i){
     
-        /* code */
-      //  sleep(1);
-
-        printf("\r*LIQUID*--->number of produceing=%d --->number of inspection=%d --->number of packaging=%d\n",produce_index,inspection_index,packaging_index);
-         printf("*LIQUID*---->new Emp  %d THRESHOLD =%d <---\n",numOfAddEmp,p-i);
-        if(numOfAddEmp != maxNumOfEmp){ // max number  of emp can i add is 2 
-            if (p - i == THRESHOLD){//THRESHOLD
-                printf("**LIQUID*---->add new thread <---\n");
-                pthread_t new_thread ;
-                pthread_create(&new_thread, NULL, inspection, NULL);
-                numOfAddEmp ++;
-            }
+    /* code */
+    //  sleep(1);
+    printf("\r *LIQUID*-->number of produceing=%d --->number of inspection=%d --->number of packaging=%d\n",produce_index,inspection_index,packaging_index);
+        printf("*LOQUID*---->new Emp  %d THRESHOLD =%d <---\n",numOfAddEmp,p-i);
+    if(numOfAddEmp != maxNumOfEmp){ // max number  of emp can i add is 2 
+        if (p - i >= THRESHOLD){//THRESHOLD
+            printf("*LIQUID*---->add new thread <---\n");
+            numOfAddEmp ++;
         }
-    
-    
-}
+    }
 
+}
 int main(int argc, char *argv[]) {
     lineNumber = atoi(argv[1]);
+    openID = atoi(argv[2]);
     maxNumOfEmp=readFromFile("maxNumOfAddEmp=");
-    int numEmp = readFromFile("numOfEmp=");
+    *lineNumberThread = lineNumber;
     pthread_t prod_thread;
-    pthread_create(&prod_thread, NULL, produce, NULL);
+    pthread_create(&prod_thread, NULL, produce, (void *)lineNumberThread);
 //    pthread_create(&check_thread, NULL, checking, NULL);
 
     pthread_t ins_thread[numEmp];
     pthread_t pac_thread[numEmp];
-    
     sleep(1);
     pthread_cond_signal(&cond_produce);
     sleep(1);
     
-
     for (long i = 0; i < numEmp; i++) {
-        pthread_create(&ins_thread[i], NULL, inspection, NULL);
-        pthread_create(&pac_thread[i], NULL, packaging, NULL);
+        pthread_create(&ins_thread[i], NULL, inspection, (void *)lineNumberThread);
+        pthread_create(&pac_thread[i], NULL, packaging, (void *)lineNumberThread);
     }
-
+    // while(1){
+    //     checking(produce_index,inspection_index);
+    //     if (sigset(SIGUSR2, signal_catcher) == SIG_ERR ) {
+    //         perror("Sigset can not set SIGUSR1");
+    //         exit(SIGUSR2);
+    //     }
+    //     sleep(2);
+    // }
     pthread_join(prod_thread, NULL);
     //pthread_join(check_thread, NULL);
     for (int i = 0; i < numEmp; i++) {
